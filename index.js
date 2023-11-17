@@ -10,13 +10,17 @@ app.use(cors())
 app.use(express.json());
 
 
+const SSLCommerzPayment = require('sslcommerz-lts')
+const store_id = process.env.store_id
+const store_passwd = process.env.store_passwd
+const is_live = false
 
 
 
 
 
-
-
+console.log(store_id);
+console.log(store_passwd);
 
 const verifyJWT = (req, res, next) => {
      const authorization = req.headers.authorization;
@@ -57,6 +61,7 @@ async function run() {
      const addcardCollection = client.db('Logeachi').collection('addcard');
      const CategoryCollection = client.db('Logeachi').collection('category');
      const UsersCollection = client.db('Logeachi').collection('users');
+     const addressCollection = client.db('Logeachi').collection('address');
 
 
 
@@ -80,6 +85,8 @@ async function run() {
 
           res.send({ token })
      })
+     //  Product releted API
+
      app.get('/product', async (req, res) => {
           const result = await ProductCollection.find().toArray();
           res.send(result);
@@ -95,9 +102,16 @@ async function run() {
           res.send(result)
      })
 
-     //  wish lsit  Related API
+     app.get('/product/category/:category', async (req, res) => {
+          const category = req.params.category;
+          const query = { category: category }
+          const result = await ProductCollection.find(query).toArray();
+          res.send(result)
+     })
 
-     app.post('/product/wishlist',verifyJWT, async (req, res) => {
+
+
+     app.post('/product/wishlist', verifyJWT, async (req, res) => {
           const { wishList } = req.body;
           console.log(wishList);
           const result = await WishlistCollection.insertOne(wishList);
@@ -120,6 +134,7 @@ async function run() {
      // add card Collection 
      app.post('/product/addcard', verifyJWT, async (req, res) => {
           const { addcard } = req.body;
+          console.log(addcard);
           const result = await addcardCollection.insertOne(addcard);
           res.send(result)
      })
@@ -142,6 +157,75 @@ async function run() {
           const result = await CategoryCollection.find().toArray();
           res.send(result);
      })
+
+     //  address related api 
+
+
+
+     app.post('/address', verifyJWT, async (res, req) => {
+          const data = req.body;
+          const result = await addressCollection.insertOne(data);
+          res.send(result)
+     })
+     app.get('/address', async (res, req) => {
+          const email = req.query?.email
+
+          const result = await addressCollection.findOne({ email });
+          res.send(result)
+     })
+
+
+     // payment related api 
+
+
+
+
+     app.post('/order', verifyJWT, (req, res) => {
+          const tran_id = new ObjectId().toString();
+          const item = req.body;
+          console.log(item);
+          const data = {
+               total_amount: item?.price,
+               currency: 'BDT',
+               tran_id: tran_id, // use unique tran_id for each api call
+               success_url: `http://localhost:5000/payment/success/${tran_id}`,
+               fail_url: `http://localhost:5000/payment/fail/${tran_id}`,
+               cancel_url: 'http://localhost:5000/cancel',
+               ipn_url: 'http://localhost:5000/ipn',
+               shipping_method: 'Courier',
+               product_name: item?.name,
+               product_category: 'Electronic',
+               product_profile: 'general',
+               cus_name: item?.userName,
+               cus_email: item?.email,
+               cus_add1: item?.address,
+               cus_add2: 'Dhaka',
+               cus_city: 'Dhaka',
+               cus_state: 'Dhaka',
+               cus_postcode: '1000',
+               cus_country: 'Bangladesh',
+               cus_phone: '01711111111',
+               cus_fax: '01711111111',
+               ship_name: item?.name,
+               ship_add1: 'Dhaka',
+               ship_add2: 'Dhaka',
+               ship_city: 'Dhaka',
+               ship_state: 'Dhaka',
+               ship_postcode: item?.post,
+               ship_country: 'Bangladesh',
+          };
+
+          const sslcz = new SSLCommerzPayment(store_id, store_passwd, is_live)
+          sslcz.init(data).then(apiResponse => {
+               // Redirect the user to payment gateway
+               let GatewayPageURL = apiResponse.GatewayPageURL
+               res.send(GatewayPageURL)
+               console.log('Redirecting to: ', GatewayPageURL)
+          });
+     })
+
+
+
 
      // Send a ping to confirm a successful connection
      await client.db("admin").command({ ping: 1 });
