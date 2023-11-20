@@ -62,6 +62,8 @@ async function run() {
      const CategoryCollection = client.db('Logeachi').collection('category');
      const UsersCollection = client.db('Logeachi').collection('users');
      const addressCollection = client.db('Logeachi').collection('address');
+     const OrdersCollection = client.db('Logeachi').collection('orders');
+
 
 
 
@@ -69,8 +71,16 @@ async function run() {
 
      app.post('/users', async (req, res) => {
           const body = req.body;
-          const result = await UsersCollection.insertOne(body);
-          res.send(result);
+          const query = { email: body?.email };
+          const result = await UsersCollection.findOne(query);
+
+          if (result) {
+               res.send({ massage: "user allReady execute" });
+          } else {
+
+          }
+          const data = await UsersCollection.insertOne(body);
+          res.send(data);
      })
 
      app.get('/users', async (req, res) => {
@@ -88,7 +98,24 @@ async function run() {
      //  Product releted API
 
      app.get('/product', async (req, res) => {
-          const result = await ProductCollection.find().toArray();
+          const params = req.query;
+
+          const minPrice = 0;
+          const maxPrice = 1000;
+
+          const minprice = parseInt(params?.minprice);
+          const maxprice = parseInt(params?.maxprice);
+          console.log(params);
+          const result = await ProductCollection.find({
+               "$or": [
+
+                    { category: { $regex: params?.category, $options: 'i' } },
+                    { name: { $regex: params?.name, $options: 'i' } },
+               ],
+               price: { $gte: minprice ? minprice : minPrice, $lte: maxprice ? maxprice : maxPrice }
+          }).toArray();
+
+          // Display the search results
           res.send(result);
      })
      app.get('/product/:id', async (req, res) => {
@@ -98,7 +125,7 @@ async function run() {
      })
      app.get('/product', async (req, res) => {
           const query = { category: req.query?.category };
-          const result = await ProdjuctCollection.find(query).toArray();
+          const result = await ProductCollection.find(query).toArray();
           res.send(result)
      })
 
@@ -134,7 +161,6 @@ async function run() {
      // add card Collection 
      app.post('/product/addcard', verifyJWT, async (req, res) => {
           const { addcard } = req.body;
-          console.log(addcard);
           const result = await addcardCollection.insertOne(addcard);
           res.send(result)
      })
@@ -162,41 +188,50 @@ async function run() {
 
 
 
-     app.post('/address', verifyJWT, async (res, req) => {
-          const data = req.body;
-          const result = await addressCollection.insertOne(data);
-          res.send(result)
-     })
-     app.get('/address', async (res, req) => {
-          const email = req.query?.email
-
-          const result = await addressCollection.findOne({ email });
+     app.post('/address', verifyJWT, async (req, res) => {
+          const addressData = req?.body;
+          console.log(addressData,);
+          const result = await addressCollection.insertOne(addressData)
           res.send(result)
      })
 
+
+     app.get('/address', async (req, res) => {
+          const email = req.query?.email;
+          const result = await addressCollection.findOne({ email })
+          res.send(result);
+     })
 
      // payment related api 
 
 
 
+     const tran_id = new ObjectId().toString();
 
-     app.post('/order', verifyJWT, (req, res) => {
-          const tran_id = new ObjectId().toString();
+     app.post('/payment', verifyJWT, async (req, res) => {
+
           const item = req.body;
-          console.log(item);
+
+
+          item.productId = new ObjectId(item.productId);
+          item.userId = new ObjectId(item.userId);
+          item.createdAt = new Date();
           const data = {
+
+
                total_amount: item?.price,
                currency: 'BDT',
                tran_id: tran_id, // use unique tran_id for each api call
-               success_url: `http://localhost:5000/payment/success/${tran_id}`,
-               fail_url: `http://localhost:5000/payment/fail/${tran_id}`,
-               cancel_url: 'http://localhost:5000/cancel',
-               ipn_url: 'http://localhost:5000/ipn',
+
+               success_url: `https://logeachi-com-server.vercel.app/payment/success/${tran_id}`,
+               fail_url: `https://logeachi-com-server.vercel.app/payment/fail/${tran_id}`,
+               cancel_url: 'https://logeachi-com-server.vercel.app/cancel',
+               ipn_url: 'https://logeachi-com-server.vercel.app/ipn',
                shipping_method: 'Courier',
-               product_name: item?.name,
+               product_name: item?.ProductName,
                product_category: 'Electronic',
                product_profile: 'general',
-               cus_name: item?.userName,
+               cus_name: item?.name,
                cus_email: item?.email,
                cus_add1: item?.address,
                cus_add2: 'Dhaka',
@@ -211,18 +246,88 @@ async function run() {
                ship_add2: 'Dhaka',
                ship_city: 'Dhaka',
                ship_state: 'Dhaka',
-               ship_postcode: item?.post,
-               ship_country: 'Bangladesh',
+               ship_postcode: 5800,
+               ship_country: item?.country ? item?.country : "bangladesh",
           };
 
           const sslcz = new SSLCommerzPayment(store_id, store_passwd, is_live)
           sslcz.init(data).then(apiResponse => {
                // Redirect the user to payment gateway
-               let GatewayPageURL = apiResponse.GatewayPageURL
+               let GatewayPageURL = apiResponse.GatewayPageURL;
+
+               item.tranjectionId = tran_id
+               item.paidStatus = false
+               const result = OrdersCollection.insertOne(item);
                res.send(GatewayPageURL)
                console.log('Redirecting to: ', GatewayPageURL)
           });
+          console.log(item);
+
+          app.post('/payment/success/:tranID', async (req, res) => {
+               console.log("shdfdfad");
+               console.log(req.params.tranID);
+               const data = await OrdersCollection.findOne({ tranjectionId: req.params.tranID });
+
+               const result = await OrdersCollection.updateOne(
+                    { tranjectionId: req.params.tranID }, {
+                    $set: {
+                         paidStatus: true
+                    }
+               });
+               const deleteCard = await addcardCollection.deleteOne({ _id: new ObjectId(data?.cardId) });
+               console.log(deleteCard);
+               console.log(result);
+
+               if (result.matchedCount > 0 && deleteCard?.deletedCount > 0) {
+                    res.redirect(`https://logecgi-com.vercel.app/payment/success/${req.params.tranID}`)
+               }
+          })
+
+          app.post('/payment/fail/:tranID', async (req, res) => {
+
+
+               const result = await OrdersCollection.deleteOne(
+                    { tranjectionId: req.params.tranID })
+
+               if (result.deletedCount > 0) {
+                    res.redirect(`https://logecgi-com.vercel.app/paymentfail/fail/${req.params.tranID}`)
+               }
+          })
+
      })
+
+
+     //   oder related api ?
+
+
+     app.get('/orders', async (req, res) => {
+
+          const orderDetails = await OrdersCollection.aggregate([
+               {
+                    $match: { email: req?.query?.email }
+               },
+               {
+                    $lookup: {
+                         from: 'users',
+                         localField: 'userId',
+                         foreignField: '_id',
+                         as: 'user'
+                    }
+               },
+               {
+                    $lookup: {
+                         from: 'product',
+                         localField: 'productId',
+                         foreignField: '_id',
+                         as: 'product'
+                    }
+               }
+          ]).toArray();
+          console.log(orderDetails);
+          res.send(orderDetails)
+
+     })
+
 
 
 
